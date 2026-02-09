@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DevDocs — Developer Task Documentation</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+  <link rel="stylesheet" href="styles.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+</head>
+<body>
+
+<!-- ========== SIDEBAR ========== -->
+<div class="sidebar-overlay" id="sidebarOverlay"></div>
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-brand">
+    <div class="brand-icon"><i class="fas fa-code"></i></div>
+    DevDocs
+  </div>
+  <nav class="sidebar-nav">
+    <!-- Main -->
+    <div class="nav-group">
+      <div class="nav-group-title" onclick="toggleNavGroup(this)">
+        Main <i class="fas fa-chevron-down chevron"></i>
+      </div>
+      <ul class="nav-items">
+        <li class="nav-item">
+          <a href="#" data-page="dashboard" class="active" onclick="navigateTo('dashboard',this)">
+            <span class="nav-icon"><i class="fas fa-th-large"></i></span> Dashboard
+          </a>
+        </li>
+        <li class="nav-item">
+          <a href="#" data-page="tasks" onclick="navigateTo('tasks',this)">
+            <span class="nav-icon"><i class="fas fa-tasks"></i></span> Task List
+          </a>
+        </li>
+        <li class="nav-item">
+          <a href="#" data-page="docs" onclick="navigateTo('docs',this)">
+            <span class="nav-icon"><i class="fas fa-file-alt"></i></span> Documentation
+          </a>
+        </li>
+      </ul>
+    </div>
+    <!-- Quick Filters -->
+    <div class="nav-group">
+      <div class="nav-group-title" onclick="toggleNavGroup(this)">
+        Filters <i class="fas fa-chevron-down chevron"></i>
+      </div>
+      <ul class="nav-items">
+        <li class="nav-item">
+          <a href="#" onclick="filterTasksByStatus('all');navigateTo('tasks',this)">
+            <span class="nav-icon"><i class="fas fa-layer-group"></i></span> All Tasks
+          </a>
+        </li>
+        <li class="nav-item">
+          <a href="#" onclick="filterTasksByStatus('in-progress');navigateTo('tasks',this)">
+            <span class="nav-icon"><i class="fas fa-spinner"></i></span> In Progress
+          </a>
+        </li>
+        <li class="nav-item">
+          <a href="#" onclick="filterTasksByStatus('completed');navigateTo('tasks',this)">
+            <span class="nav-icon"><i class="fas fa-check-circle"></i></span> Completed
+          </a>
+        </li>
+        <li class="nav-item">
+          <a href="#" onclick="filterTasksByStatus('pending');navigateTo('tasks',this)">
+            <span class="nav-icon"><i class="fas fa-clock"></i></span> Pending
+          </a>
+        </li>
+      </ul>
+    </div>
+    <!-- Priority -->
+    <div class="nav-group">
+      <div class="nav-group-title" onclick="toggleNavGroup(this)">
+        Priority <i class="fas fa-chevron-down chevron"></i>
+      </div>
+      <ul class="nav-items">
+        <li class="nav-item">
+          <a href="#" onclick="filterTasksByPriority('high');navigateTo('tasks',this)">
+            <span class="nav-icon"><i class="fas fa-fire"></i></span> High
+          </a>
+        </li>
+        <li class="nav-item">
+          <a href="#" onclick="filterTasksByPriority('medium');navigateTo('tasks',this)">
+            <span class="nav-icon"><i class="fas fa-exclamation-circle"></i></span> Medium
+          </a>
+        </li>
+        <li class="nav-item">
+          <a href="#" onclick="filterTasksByPriority('low');navigateTo('tasks',this)">
+            <span class="nav-icon"><i class="fas fa-leaf"></i></span> Low
+          </a>
+        </li>
+      </ul>
+    </div>
+  </nav>
+  <div class="sidebar-footer">
+    <i class="fas fa-file-pdf" style="color:var(--primary);margin-right:4px"></i> PDF storage
+    <br>&copy; 2026 DevDocs
+  </div>
+</aside>
+
+<!-- ========== HEADER ========== -->
+<header class="header">
+  <div class="header-left">
+    <button class="hamburger" id="hamburgerBtn" onclick="toggleSidebar()">
+      <i class="fas fa-bars"></i>
+    </button>
+    <div class="header-search">
+      <i class="fas fa-search search-icon"></i>
+      <input type="text" id="globalSearch" placeholder="Search tasks & docs…" autocomplete="off" oninput="handleSearch(this.value)" />
+      <div class="search-results" id="searchResults"></div>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="storage-controls">
+      <span class="storage-indicator disconnected" id="storageIndicator" title="Not connected to disk">
+        <i class="fas fa-plug-circle-xmark"></i> No folder
+      </span>
+      <button class="btn btn-sm btn-secondary storage-btn" onclick="pickFolder()" title="Select a folder to save PDFs on disk">
+        <i class="fas fa-folder-open"></i> Set Folder
+      </button>
+      <button class="btn-icon btn-sm" onclick="savePDFToFolder()" title="Save all data as PDF">
+        <i class="fas fa-file-pdf"></i>
+      </button>
+      <button class="btn btn-sm btn-clear" onclick="clearAllData()" title="Clear all tasks and documents">
+        <i class="fas fa-trash-can"></i> Clear
+      </button>
+    </div>
+    <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Toggle dark/light mode">
+      <i class="fas fa-moon"></i>
+    </button>
+  </div>
+</header>
+
+<!-- ========== MAIN CONTENT ========== -->
+<main class="main">
+
+  <!-- ===== DASHBOARD ===== -->
+  <section class="page active" id="page-dashboard">
+    <div class="page-header">
+      <div>
+        <h1>Dashboard</h1>
+        <p>Overview of your development progress</p>
+      </div>
+    </div>
+
+    <div class="stats-grid">
+      <div class="card stat-card">
+        <div class="stat-icon pink"><i class="fas fa-list-check"></i></div>
+        <div class="stat-number" id="statTotal">0</div>
+        <div class="stat-label">Total Tasks</div>
+      </div>
+      <div class="card stat-card">
+        <div class="stat-icon green"><i class="fas fa-circle-check"></i></div>
+        <div class="stat-number" id="statCompleted">0</div>
+        <div class="stat-label">Completed</div>
+      </div>
+      <div class="card stat-card">
+        <div class="stat-icon orange"><i class="fas fa-spinner"></i></div>
+        <div class="stat-number" id="statInProgress">0</div>
+        <div class="stat-label">In Progress</div>
+      </div>
+      <div class="card stat-card">
+        <div class="stat-icon blue"><i class="fas fa-clock"></i></div>
+        <div class="stat-number" id="statPending">0</div>
+        <div class="stat-label">Pending</div>
+      </div>
+    </div>
+
+    <div class="dashboard-grid">
+      <div class="card">
+        <h3 style="margin-bottom:16px;font-size:1.05rem">Recent Activity</h3>
+        <ul class="activity-list" id="activityList">
+          <li class="empty-state" style="padding:30px">
+            <div class="empty-icon"><i class="fas fa-inbox"></i></div>
+            <p>No activity yet. Add some tasks to get started!</p>
+          </li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3 style="margin-bottom:16px;font-size:1.05rem">Completion Rate</h3>
+        <div style="display:flex;align-items:center;justify-content:center;flex-direction:column;padding:20px 0">
+          <div id="completionRing" style="position:relative;width:140px;height:140px">
+            <svg width="140" height="140" viewBox="0 0 140 140">
+              <circle cx="70" cy="70" r="58" fill="none" stroke="var(--border)" stroke-width="12"/>
+              <circle id="progressCircle" cx="70" cy="70" r="58" fill="none" stroke="var(--primary)" stroke-width="12"
+                stroke-linecap="round" stroke-dasharray="364.42" stroke-dashoffset="364.42"
+                transform="rotate(-90 70 70)" style="transition:stroke-dashoffset .8s ease"/>
+            </svg>
+            <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:1.6rem;font-weight:800" id="completionPct">0%</div>
+          </div>
+          <p style="color:var(--text-secondary);font-size:.85rem;margin-top:12px" id="completionLabel">No tasks yet</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== TASK LIST ===== -->
+  <section class="page" id="page-tasks">
+    <div class="page-header">
+      <div>
+        <h1>Task List</h1>
+        <p>Manage your daily development tasks</p>
+      </div>
+      <button class="btn btn-primary" onclick="openTaskModal()">
+        <i class="fas fa-plus"></i> New Task
+      </button>
+    </div>
+
+    <div class="task-controls">
+      <select id="filterStatus" onchange="applyFilters()">
+        <option value="all">All Status</option>
+        <option value="pending">Pending</option>
+        <option value="in-progress">In Progress</option>
+        <option value="completed">Completed</option>
+      </select>
+      <select id="filterPriority" onchange="applyFilters()">
+        <option value="all">All Priority</option>
+        <option value="high">High</option>
+        <option value="medium">Medium</option>
+        <option value="low">Low</option>
+      </select>
+    </div>
+
+    <div class="card" style="padding:0;overflow-x:auto">
+      <table class="task-table">
+        <thead>
+          <tr>
+            <th>Task</th>
+            <th>Status</th>
+            <th>Priority</th>
+            <th>Date</th>
+            <th style="width:100px">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="taskTableBody">
+          <!-- rendered by JS -->
+        </tbody>
+      </table>
+      <div class="empty-state" id="taskEmptyState" style="display:none">
+        <div class="empty-icon"><i class="fas fa-clipboard-list"></i></div>
+        <h3>No tasks found</h3>
+        <p>Create your first task to get started</p>
+        <button class="btn btn-primary" onclick="openTaskModal()"><i class="fas fa-plus"></i> New Task</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== TASK DETAIL ===== -->
+  <section class="page" id="page-task-detail">
+    <a class="detail-back" onclick="navigateTo('tasks')"><i class="fas fa-arrow-left"></i> Back to Task List</a>
+    <div id="taskDetailContent">
+      <!-- rendered by JS -->
+    </div>
+  </section>
+
+  <!-- ===== DOCUMENTATION ===== -->
+  <section class="page" id="page-docs">
+    <div class="page-header">
+      <div>
+        <h1>Documentation</h1>
+        <p>Write detailed explanations of your tasks</p>
+      </div>
+      <button class="btn btn-primary" onclick="openDocModal()">
+        <i class="fas fa-plus"></i> New Document
+      </button>
+    </div>
+
+    <div class="docs-layout">
+      <div class="card" style="padding:0">
+        <div class="tabs" id="docTabs" style="padding:0 16px">
+          <button class="tab active" onclick="switchDocTab('list',this)">Documents</button>
+          <button class="tab" onclick="switchDocTab('editor',this)">Editor</button>
+          <button class="tab" onclick="switchDocTab('preview',this)">Preview</button>
+        </div>
+
+        <!-- Doc List -->
+        <div id="docTabList">
+          <ul class="doc-list" id="docList">
+            <!-- rendered by JS -->
+          </ul>
+          <div class="empty-state" id="docEmptyState" style="display:none">
+            <div class="empty-icon"><i class="fas fa-book-open"></i></div>
+            <h3>No documents yet</h3>
+            <p>Create your first document to begin</p>
+            <button class="btn btn-primary" onclick="openDocModal()"><i class="fas fa-plus"></i> New Document</button>
+          </div>
+        </div>
+
+        <!-- Editor -->
+        <div id="docTabEditor" style="display:none;padding:20px">
+          <div id="docEditorPlaceholder" class="empty-state" style="padding:30px">
+            <p>Select a document from the list to edit</p>
+          </div>
+          <div id="docEditorArea" style="display:none">
+            <div class="form-group">
+              <label>Title</label>
+              <input type="text" id="docEditTitle" />
+            </div>
+            <div class="form-group">
+              <label>Content (Markdown supported)</label>
+              <textarea id="docEditContent" rows="16"></textarea>
+            </div>
+            <div style="display:flex;gap:10px">
+              <button class="btn btn-primary" onclick="saveDocEdit()"><i class="fas fa-save"></i> Save</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteCurrentDoc()"><i class="fas fa-trash"></i> Delete</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Preview -->
+        <div id="docTabPreview" style="display:none">
+          <div id="docPreviewPlaceholder" class="empty-state" style="padding:30px">
+            <p>Select a document to preview</p>
+          </div>
+          <div class="doc-preview" id="docPreviewArea" style="display:none"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ========== TASK MODAL ========== -->
+<div class="modal-overlay" id="taskModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="taskModalTitle">New Task</h2>
+      <button class="modal-close" onclick="closeTaskModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="taskEditId" />
+      <div class="form-group">
+        <label>Task Title *</label>
+        <input type="text" id="taskTitle" placeholder="e.g. Fix navbar alignment" />
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Status</label>
+          <select id="taskStatus">
+            <option value="pending">Pending</option>
+            <option value="in-progress">In Progress</option>
+            <option value="completed">Completed</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Priority</label>
+          <select id="taskPriority">
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+            <option value="low">Low</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Description</label>
+        <textarea id="taskDescription" placeholder="Describe the task…"></textarea>
+      </div>
+      <div class="form-group">
+        <label>Code Snippet (optional)</label>
+        <textarea id="taskCode" placeholder="Paste code here…" style="font-family:'Fira Code',monospace;font-size:.88rem"></textarea>
+      </div>
+      <div class="form-group">
+        <label>Notes</label>
+        <textarea id="taskNotes" placeholder="Additional notes…" rows="3"></textarea>
+      </div>
+      <div class="form-group">
+        <label>Screenshot URLs (one per line)</label>
+        <textarea id="taskScreenshots" placeholder="https://example.com/screenshot.png" rows="3"></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeTaskModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveTask()"><i class="fas fa-save"></i> Save Task</button>
+    </div>
+  </div>
+</div>
+
+<!-- ========== DOC MODAL ========== -->
+<div class="modal-overlay" id="docModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>New Document</h2>
+      <button class="modal-close" onclick="closeDocModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>Title *</label>
+        <input type="text" id="newDocTitle" placeholder="e.g. API Integration Guide" />
+      </div>
+      <div class="form-group">
+        <label>Initial Content</label>
+        <textarea id="newDocContent" rows="8" placeholder="Write your documentation here… Markdown is supported."></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeDocModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveNewDoc()"><i class="fas fa-save"></i> Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- ========== TOAST CONTAINER ========== -->
+<div class="toast-container" id="toastContainer"></div>
+
+<script src="app.js"></script>
+</body>
+</html>

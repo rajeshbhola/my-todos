@@ -1,0 +1,2183 @@
+/**
+ * DiffChecker Application
+ * Main application entry point
+ * Phase 5: Complete App Logic Implementation
+ */
+
+(function() {
+    'use strict';
+
+    // ==========================================
+    // Application State
+    // ==========================================
+    const state = {
+        diffResult: null,
+        currentView: 'side-by-side', // 'side-by-side' or 'inline'
+        options: {
+            ignoreCase: false,
+            ignoreWhitespace: false,
+            trimLines: false
+        },
+        hasComputed: false
+    };
+
+    // ==========================================
+    // 5.1 DOM Elements Cache
+    // ==========================================
+    const elements = {};
+
+    function cacheElements() {
+        // App container
+        elements.app = document.getElementById('app');
+
+        // Textareas
+        elements.originalText = document.getElementById('originalText');
+        elements.modifiedText = document.getElementById('modifiedText');
+
+        // Line count displays
+        elements.originalLineCount = document.getElementById('originalLineCount');
+        elements.modifiedLineCount = document.getElementById('modifiedLineCount');
+
+        // Buttons
+        elements.btnFindDiff = document.getElementById('btnFindDiff');
+        elements.btnClearAll = document.getElementById('btnClearAll');
+        elements.btnSwapSides = document.getElementById('btnSwapSides');
+        elements.btnSampleData = document.getElementById('btnSampleData');
+
+        // Option checkboxes
+        elements.optIgnoreWhitespace = document.getElementById('optIgnoreWhitespace');
+        elements.optIgnoreCase = document.getElementById('optIgnoreCase');
+        elements.optTrimLines = document.getElementById('optTrimLines');
+
+        // View toggle
+        elements.viewToggle = document.getElementById('viewToggle');
+        elements.viewModeInputs = document.querySelectorAll('input[name="viewMode"]');
+
+        // Stats bar
+        elements.statsBar = document.getElementById('statsBar');
+        elements.statAdditions = document.getElementById('statAdditions');
+        elements.statDeletions = document.getElementById('statDeletions');
+        elements.statUnchanged = document.getElementById('statUnchanged');
+
+        // Result containers
+        elements.resultsContainer = document.getElementById('resultsContainer');
+        elements.resultSideBySide = document.getElementById('resultSideBySide');
+        elements.resultInline = document.getElementById('resultInline');
+        elements.resultLeftContent = document.getElementById('resultLeftContent');
+        elements.resultRightContent = document.getElementById('resultRightContent');
+        elements.resultInlineContent = document.getElementById('resultInlineContent');
+    }
+
+    // ==========================================
+    // Event Binding
+    // ==========================================
+    function bindEvents() {
+        // 5.2 Wire "Find Differences" click
+        elements.btnFindDiff.addEventListener('click', handleFindDiff);
+
+        // 5.8 Wire live line count
+        elements.originalText.addEventListener('input', () => {
+            updateLineCount(elements.originalText, elements.originalLineCount);
+        });
+        elements.modifiedText.addEventListener('input', () => {
+            updateLineCount(elements.modifiedText, elements.modifiedLineCount);
+        });
+
+        // 5.9 Wire "Clear All" button
+        elements.btnClearAll.addEventListener('click', handleClearAll);
+
+        // 5.10 Wire "Swap Sides" button
+        elements.btnSwapSides.addEventListener('click', handleSwapSides);
+
+        // 5.11 Wire "Sample Data" button
+        elements.btnSampleData.addEventListener('click', handleSampleData);
+
+        // 5.12 Wire view toggle
+        elements.viewModeInputs.forEach(input => {
+            input.addEventListener('change', handleViewToggle);
+        });
+
+        // 5.13 Wire option checkboxes
+        elements.optIgnoreWhitespace.addEventListener('change', handleOptionChange);
+        elements.optIgnoreCase.addEventListener('change', handleOptionChange);
+        elements.optTrimLines.addEventListener('change', handleOptionChange);
+
+        // 5.14 Wire keyboard shortcuts
+        document.addEventListener('keydown', handleKeyboardShortcuts);
+
+        // 5.15 Add synchronized scrolling
+        setupSynchronizedScrolling();
+    }
+
+    // ==========================================
+    // 5.2 Handle Find Differences
+    // ==========================================
+    function handleFindDiff() {
+        const originalText = elements.originalText.value;
+        const modifiedText = elements.modifiedText.value;
+
+        // Update options from checkboxes
+        state.options = {
+            ignoreCase: elements.optIgnoreCase.checked,
+            ignoreWhitespace: elements.optIgnoreWhitespace.checked,
+            trimLines: elements.optTrimLines.checked
+        };
+
+        // Generate diff result
+        state.diffResult = DiffModule.generateDiffResult(originalText, modifiedText, state.options);
+        state.hasComputed = true;
+
+        // Render the results
+        renderResults();
+    }
+
+    // ==========================================
+    // Render Results (orchestrator)
+    // ==========================================
+    function renderResults() {
+        if (!state.diffResult) {
+            renderEmptyState();
+            return;
+        }
+
+        // Check for empty input or identical texts
+        if (state.diffResult.isEmpty) {
+            renderEmptyState('paste');
+            return;
+        }
+
+        if (state.diffResult.isIdentical) {
+            renderEmptyState('identical');
+            return;
+        }
+
+        // Render stats
+        renderStats(state.diffResult);
+
+        // Render based on current view mode
+        if (state.currentView === 'side-by-side') {
+            renderSideBySide(state.diffResult);
+            elements.resultSideBySide.classList.remove('hidden');
+            elements.resultInline.classList.add('hidden');
+        } else {
+            renderInline(state.diffResult);
+            elements.resultInline.classList.remove('hidden');
+            elements.resultSideBySide.classList.add('hidden');
+        }
+    }
+
+    // ==========================================
+    // 5.3 Render Side-by-Side View
+    // ==========================================
+    function renderSideBySide(result) {
+        const { left, right } = result.sideBySide;
+
+        elements.resultLeftContent.innerHTML = renderSideBySideColumn(left, true);
+        elements.resultRightContent.innerHTML = renderSideBySideColumn(right, false);
+    }
+
+    function renderSideBySideColumn(lines, isLeft) {
+        if (lines.length === 0) {
+            return '<div class="result-placeholder"><span class="result-placeholder__icon">📄</span><p class="result-placeholder__message">No content</p></div>';
+        }
+
+        return lines.map(line => {
+            const lineNumber = line.lineNumber !== null ? line.lineNumber : '';
+            const typeClass = getLineTypeClass(line.type);
+            let content = '';
+
+            if (line.type === DiffModule.DiffType.MODIFIED && line.charDiff) {
+                // Render character-level highlights
+                content = renderCharHighlights(line.charDiff, isLeft);
+            } else if (line.type === 'empty') {
+                content = '&nbsp;';
+            } else {
+                content = escapeHTML(line.content);
+            }
+
+            return `
+                <div class="diff-line ${typeClass}">
+                    <span class="diff-line__number">${lineNumber}</span>
+                    <span class="diff-line__content">${content || '&nbsp;'}</span>
+                </div>
+            `;
+        }).join('');
+    }
+
+    // ==========================================
+    // 5.4 Render Inline (Unified) View
+    // ==========================================
+    function renderInline(result) {
+        const lines = result.inline;
+
+        if (lines.length === 0) {
+            elements.resultInlineContent.innerHTML = '<div class="result-placeholder"><span class="result-placeholder__icon">📝</span><p class="result-placeholder__message">No content</p></div>';
+            return;
+        }
+
+        const html = lines.map(line => {
+            const leftNum = line.leftLineNumber !== null ? line.leftLineNumber : '';
+            const rightNum = line.rightLineNumber !== null ? line.rightLineNumber : '';
+            const typeClass = getLineTypeClass(line.type);
+            let content = '';
+
+            if (line.charDiff && line.isModified) {
+                // Render character-level highlights
+                const showRemoved = line.type === DiffModule.DiffType.REMOVED;
+                content = renderCharHighlights(line.charDiff, showRemoved);
+            } else {
+                content = escapeHTML(line.content);
+            }
+
+            return `
+                <div class="diff-line ${typeClass}">
+                    <span class="diff-line__number">${leftNum}</span>
+                    <span class="diff-line__number">${rightNum}</span>
+                    <span class="diff-line__prefix">${line.prefix}</span>
+                    <span class="diff-line__content">${content || '&nbsp;'}</span>
+                </div>
+            `;
+        }).join('');
+
+        elements.resultInlineContent.innerHTML = html;
+    }
+
+    // ==========================================
+    // 5.5 / 6.3 / 6.4 Render Character Highlights
+    //
+    // 6.3: Render removed line with highlights
+    //      - Unchanged chars normal
+    //      - Removed chars wrapped in <span class="char-removed">
+    //
+    // 6.4: Render added line with highlights
+    //      - Unchanged chars normal
+    //      - Added chars wrapped in <span class="char-added">
+    // ==========================================
+    function renderCharHighlights(charDiff, showRemoved = true) {
+        if (!charDiff || charDiff.length === 0) return '';
+
+        return charDiff.map(segment => {
+            const escapedText = escapeHTML(segment.text);
+
+            switch (segment.type) {
+                case DiffModule.DiffType.EQUAL:
+                    // Unchanged characters - render normally
+                    return escapedText;
+                case DiffModule.DiffType.REMOVED:
+                    // 6.3: Removed chars get highlight (only on left/original side)
+                    return showRemoved ? `<span class="char-removed">${escapedText}</span>` : '';
+                case DiffModule.DiffType.ADDED:
+                    // 6.4: Added chars get highlight (only on right/modified side)
+                    return !showRemoved ? `<span class="char-added">${escapedText}</span>` : '';
+                default:
+                    return escapedText;
+            }
+        }).join('');
+    }
+
+    // ==========================================
+    // 5.6 Render Stats
+    // ==========================================
+    function renderStats(result) {
+        const stats = result.stats;
+
+        // Update stat counts (additions includes modifications for display)
+        elements.statAdditions.textContent = stats.additions + stats.modifications;
+        elements.statDeletions.textContent = stats.deletions + stats.modifications;
+        elements.statUnchanged.textContent = stats.unchanged;
+    }
+
+    // ==========================================
+    // 5.7 Render Empty State
+    // ==========================================
+    function renderEmptyState(reason = 'paste') {
+        let icon, message;
+
+        switch (reason) {
+            case 'identical':
+                icon = '✅';
+                message = 'No differences found! The texts are identical.';
+                break;
+            case 'paste':
+            default:
+                icon = '📝';
+                message = 'Paste text in both panels and click "Find Differences"';
+                break;
+        }
+
+        const emptyHTML = `
+            <div class="${reason === 'identical' ? 'result-no-diff' : 'result-placeholder'}">
+                <span class="${reason === 'identical' ? 'result-no-diff__icon' : 'result-placeholder__icon'}">${icon}</span>
+                <p class="${reason === 'identical' ? 'result-no-diff__message' : 'result-placeholder__message'}">${message}</p>
+            </div>
+        `;
+
+        // Reset stats
+        elements.statAdditions.textContent = '0';
+        elements.statDeletions.textContent = '0';
+        elements.statUnchanged.textContent = '0';
+
+        // Update both views
+        elements.resultLeftContent.innerHTML = emptyHTML;
+        elements.resultRightContent.innerHTML = emptyHTML;
+        elements.resultInlineContent.innerHTML = emptyHTML;
+    }
+
+    // ==========================================
+    // 5.8 Update Line Count
+    // ==========================================
+    function updateLineCount(textarea, display) {
+        const text = textarea.value;
+        const lineCount = text === '' ? 0 : text.split('\n').length;
+        display.textContent = `${lineCount} line${lineCount !== 1 ? 's' : ''}`;
+    }
+
+    // ==========================================
+    // 5.9 Handle Clear All
+    // ==========================================
+    function handleClearAll() {
+        // Clear textareas
+        elements.originalText.value = '';
+        elements.modifiedText.value = '';
+
+        // Update line counts
+        updateLineCount(elements.originalText, elements.originalLineCount);
+        updateLineCount(elements.modifiedText, elements.modifiedLineCount);
+
+        // Reset state
+        state.diffResult = null;
+        state.hasComputed = false;
+
+        // Reset checkboxes
+        elements.optIgnoreCase.checked = false;
+        elements.optIgnoreWhitespace.checked = false;
+        elements.optTrimLines.checked = false;
+
+        // Render empty state
+        renderEmptyState('paste');
+
+        // Focus on original text
+        elements.originalText.focus();
+    }
+
+    // ==========================================
+    // 5.10 Handle Swap Sides
+    // ==========================================
+    function handleSwapSides() {
+        const originalValue = elements.originalText.value;
+        const modifiedValue = elements.modifiedText.value;
+
+        // Swap values
+        elements.originalText.value = modifiedValue;
+        elements.modifiedText.value = originalValue;
+
+        // Update line counts
+        updateLineCount(elements.originalText, elements.originalLineCount);
+        updateLineCount(elements.modifiedText, elements.modifiedLineCount);
+
+        // Re-run diff if result exists
+        if (state.hasComputed) {
+            handleFindDiff();
+        }
+    }
+
+    // ==========================================
+    // 5.11 Handle Sample Data
+    // ==========================================
+    function handleSampleData() {
+        const sampleOriginal = `function greet(name) {
+    console.log("Hello, " + name);
+    return true;
+}
+
+const users = ["Alice", "Bob", "Charlie"];
+
+for (let i = 0; i < users.length; i++) {
+    greet(users[i]);
+}`;
+
+        const sampleModified = `function greet(name, greeting = "Hello") {
+    console.log(greeting + ", " + name + "!");
+    return true;
+}
+
+const users = ["Alice", "Bob", "Charlie", "Diana"];
+
+for (const user of users) {
+    greet(user);
+}
+
+// Added a farewell function
+function farewell(name) {
+    console.log("Goodbye, " + name);
+}`;
+
+        // Set sample data
+        elements.originalText.value = sampleOriginal;
+        elements.modifiedText.value = sampleModified;
+
+        // Update line counts
+        updateLineCount(elements.originalText, elements.originalLineCount);
+        updateLineCount(elements.modifiedText, elements.modifiedLineCount);
+
+        // Automatically run diff
+        handleFindDiff();
+    }
+
+    // ==========================================
+    // 5.12 Handle View Toggle
+    // ==========================================
+    function handleViewToggle(event) {
+        state.currentView = event.target.value;
+
+        // Re-render if we have results
+        if (state.diffResult && state.hasComputed) {
+            renderResults();
+        }
+    }
+
+    // ==========================================
+    // 5.13 Handle Option Change
+    // ==========================================
+    function handleOptionChange() {
+        // Update options
+        state.options = {
+            ignoreCase: elements.optIgnoreCase.checked,
+            ignoreWhitespace: elements.optIgnoreWhitespace.checked,
+            trimLines: elements.optTrimLines.checked
+        };
+
+        // Re-run diff if result already showing
+        if (state.hasComputed) {
+            handleFindDiff();
+        }
+    }
+
+    // ==========================================
+    // 5.14 Handle Keyboard Shortcuts
+    // ==========================================
+    function handleKeyboardShortcuts(event) {
+        // Ctrl+Enter - Find Differences
+        if (event.ctrlKey && event.key === 'Enter') {
+            event.preventDefault();
+            handleFindDiff();
+        }
+
+        // Ctrl+Shift+C - Clear All
+        if (event.ctrlKey && event.shiftKey && event.key === 'C') {
+            event.preventDefault();
+            handleClearAll();
+        }
+
+        // Ctrl+Shift+S - Swap Sides
+        if (event.ctrlKey && event.shiftKey && event.key === 'S') {
+            event.preventDefault();
+            handleSwapSides();
+        }
+    }
+
+    // ==========================================
+    // 5.15 Synchronized Scrolling
+    // ==========================================
+    function setupSynchronizedScrolling() {
+        let isScrolling = false;
+
+        const syncScroll = (source, target) => {
+            if (isScrolling) return;
+            isScrolling = true;
+
+            // Sync vertical scroll
+            target.scrollTop = source.scrollTop;
+
+            // Sync horizontal scroll
+            target.scrollLeft = source.scrollLeft;
+
+            requestAnimationFrame(() => {
+                isScrolling = false;
+            });
+        };
+
+        elements.resultLeftContent.addEventListener('scroll', () => {
+            syncScroll(elements.resultLeftContent, elements.resultRightContent);
+        });
+
+        elements.resultRightContent.addEventListener('scroll', () => {
+            syncScroll(elements.resultRightContent, elements.resultLeftContent);
+        });
+    }
+
+    // ==========================================
+    // Utility Functions
+    // ==========================================
+
+    /**
+     * Get CSS class for line type
+     */
+    function getLineTypeClass(type) {
+        switch (type) {
+            case DiffModule.DiffType.ADDED:
+                return 'diff-line--added';
+            case DiffModule.DiffType.REMOVED:
+                return 'diff-line--removed';
+            case DiffModule.DiffType.MODIFIED:
+                return 'diff-line--changed';
+            case DiffModule.DiffType.EQUAL:
+                return 'diff-line--unchanged';
+            case 'empty':
+                return 'diff-line--empty';
+            default:
+                return '';
+        }
+    }
+
+    /**
+     * Escape HTML special characters
+     */
+    function escapeHTML(text) {
+        if (text === null || text === undefined) return '';
+        if (text === '') return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    // ==========================================
+    // Initialize Application
+    // ==========================================
+    function init() {
+        cacheElements();
+        bindEvents();
+
+        // Initialize line counts
+        updateLineCount(elements.originalText, elements.originalLineCount);
+        updateLineCount(elements.modifiedText, elements.modifiedLineCount);
+
+        // Show initial empty state
+        renderEmptyState('paste');
+
+        console.log('DiffChecker initialized successfully');
+    }
+
+    // Initialize when DOM is ready
+    document.addEventListener('DOMContentLoaded', init);
+
+    // Expose public API for debugging/testing
+    window.DiffCheckerApp = {
+        getState: () => ({ ...state }),
+        runDiff: handleFindDiff,
+        clearAll: handleClearAll,
+        loadSample: handleSampleData,
+        swapSides: handleSwapSides
+    };
+
+})();
+============================================================
+/**
+ * DiffChecker Diff Module
+ * Contains logic for computing text differences
+ * Phase 4: Complete Diff Algorithm Implementation
+ */
+
+const DiffModule = (function() {
+    'use strict';
+
+    // ==========================================
+    // 4.4 Define diff operation types
+    // ==========================================
+    const DiffType = {
+        EQUAL: 'equal',      // Line is unchanged
+        ADDED: 'added',      // Line was added in modified
+        REMOVED: 'removed',  // Line was removed from original
+        MODIFIED: 'modified' // Line was changed (has char-level diff)
+    };
+
+    // ==========================================
+    // 4.1 Split input text into array of lines
+    // Handles \r\n (Windows), \n (Unix), \r (old Mac)
+    // ==========================================
+    function splitLines(text) {
+        if (text === null || text === undefined) {
+            return [];
+        }
+        if (text === '') {
+            return [''];
+        }
+        // Normalize all line endings to \n, then split
+        return text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+    }
+
+    // ==========================================
+    // 4.8 Apply options to preprocess lines
+    // ==========================================
+    function applyOptions(lines, options = {}) {
+        const {
+            ignoreCase = false,
+            ignoreWhitespace = false,
+            trimLines = false
+        } = options;
+
+        return lines.map(line => {
+            let processed = line;
+
+            if (trimLines) {
+                processed = processed.trim();
+            }
+
+            if (ignoreWhitespace) {
+                // Collapse all whitespace to single space
+                processed = processed.replace(/\s+/g, ' ').trim();
+            }
+
+            if (ignoreCase) {
+                processed = processed.toLowerCase();
+            }
+
+            return processed;
+        });
+    }
+
+    // ==========================================
+    // 4.2 Build LCS (Longest Common Subsequence) table
+    // Returns 2D array where table[i][j] = LCS length of a[0..i-1] and b[0..j-1]
+    // ==========================================
+    function buildLCSTable(a, b) {
+        const m = a.length;
+        const n = b.length;
+
+        // Create table with (m+1) x (n+1) dimensions, initialized to 0
+        const table = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
+
+        // Fill the table using dynamic programming
+        for (let i = 1; i <= m; i++) {
+            for (let j = 1; j <= n; j++) {
+                if (a[i - 1] === b[j - 1]) {
+                    // Characters match, extend the LCS
+                    table[i][j] = table[i - 1][j - 1] + 1;
+                } else {
+                    // Take the maximum of excluding either character
+                    table[i][j] = Math.max(table[i - 1][j], table[i][j - 1]);
+                }
+            }
+        }
+
+        return table;
+    }
+
+    // ==========================================
+    // 4.3 Backtrack through LCS table to produce diff operations
+    // ==========================================
+    function backtrackLCS(table, a, b, originalLines, modifiedLines) {
+        const operations = [];
+        let i = a.length;
+        let j = b.length;
+
+        // Backtrack from bottom-right to top-left
+        while (i > 0 || j > 0) {
+            if (i > 0 && j > 0 && a[i - 1] === b[j - 1]) {
+                // Lines are equal (using processed comparison)
+                operations.unshift({
+                    type: DiffType.EQUAL,
+                    originalLine: i,
+                    modifiedLine: j,
+                    content: originalLines[i - 1], // Use original (unprocessed) content
+                    originalContent: originalLines[i - 1],
+                    modifiedContent: modifiedLines[j - 1]
+                });
+                i--;
+                j--;
+            } else if (j > 0 && (i === 0 || table[i][j - 1] >= table[i - 1][j])) {
+                // Line was added in modified
+                operations.unshift({
+                    type: DiffType.ADDED,
+                    originalLine: null,
+                    modifiedLine: j,
+                    content: modifiedLines[j - 1],
+                    originalContent: null,
+                    modifiedContent: modifiedLines[j - 1]
+                });
+                j--;
+            } else if (i > 0 && (j === 0 || table[i - 1][j] > table[i][j - 1])) {
+                // Line was removed from original
+                operations.unshift({
+                    type: DiffType.REMOVED,
+                    originalLine: i,
+                    modifiedLine: null,
+                    content: originalLines[i - 1],
+                    originalContent: originalLines[i - 1],
+                    modifiedContent: null
+                });
+                i--;
+            } else {
+                break; // Safety exit
+            }
+        }
+
+        return operations;
+    }
+
+    // ==========================================
+    // 6.1 & 6.5 Pair adjacent removed+added lines for character-level sub-diffing
+    //
+    // 6.1: When a removed line is immediately followed by an added line,
+    //      treat as a "modification" and compute character-level diff
+    // 6.5: When multiple removes followed by multiple adds, pair them 1:1
+    //      where possible (first removed with first added, etc.)
+    // ==========================================
+    function pairAdjacentChanges(operations) {
+        const result = [];
+        let i = 0;
+
+        while (i < operations.length) {
+            const current = operations[i];
+
+            // 6.1: Identify when removed lines are followed by added lines
+            if (current.type === DiffType.REMOVED) {
+                // Look ahead for consecutive removed lines followed by added lines
+                const removedLines = [];
+                const addedLines = [];
+
+                // Collect consecutive removed lines
+                while (i < operations.length && operations[i].type === DiffType.REMOVED) {
+                    removedLines.push(operations[i]);
+                    i++;
+                }
+
+                // Collect consecutive added lines that follow
+                while (i < operations.length && operations[i].type === DiffType.ADDED) {
+                    addedLines.push(operations[i]);
+                    i++;
+                }
+
+                // 6.5: Pair them up 1:1 for modification comparison
+                const pairCount = Math.min(removedLines.length, addedLines.length);
+
+                for (let p = 0; p < pairCount; p++) {
+                    const removed = removedLines[p];
+                    const added = addedLines[p];
+
+                    // 6.2: Compute character-level diff for this paired line
+                    const charDiff = computeCharDiff(removed.originalContent, added.modifiedContent);
+
+                    result.push({
+                        type: DiffType.MODIFIED,
+                        originalLine: removed.originalLine,
+                        modifiedLine: added.modifiedLine,
+                        originalContent: removed.originalContent,
+                        modifiedContent: added.modifiedContent,
+                        charDiff: charDiff
+                    });
+                }
+
+                // Add remaining unpaired removed lines (pure deletions)
+                for (let p = pairCount; p < removedLines.length; p++) {
+                    result.push(removedLines[p]);
+                }
+
+                // Add remaining unpaired added lines (pure additions)
+                for (let p = pairCount; p < addedLines.length; p++) {
+                    result.push(addedLines[p]);
+                }
+            } else {
+                result.push(current);
+                i++;
+            }
+        }
+
+        return result;
+    }
+
+    // ==========================================
+    // 4.5 Main function: compute line diff
+    // Takes two strings → returns array of diff operations
+    // ==========================================
+    function computeLineDiff(original, modified, options = {}) {
+        // Split into lines
+        const originalLines = splitLines(original);
+        const modifiedLines = splitLines(modified);
+
+        // Apply preprocessing options for comparison
+        const processedOriginal = applyOptions(originalLines, options);
+        const processedModified = applyOptions(modifiedLines, options);
+
+        // Build LCS table using processed lines for comparison
+        const lcsTable = buildLCSTable(processedOriginal, processedModified);
+
+        // Backtrack to get diff operations (using original content for display)
+        const operations = backtrackLCS(
+            lcsTable,
+            processedOriginal,
+            processedModified,
+            originalLines,
+            modifiedLines
+        );
+
+        return operations;
+    }
+
+    // ==========================================
+    // 4.6 / 6.2 Character/word-level diff within a single changed line pair
+    // Uses LCS approach for characters or words
+    // ==========================================
+    function computeCharDiff(lineA, lineB, useWordLevel = false) {
+        if (lineA === null || lineA === undefined) lineA = '';
+        if (lineB === null || lineB === undefined) lineB = '';
+
+        // Choose between word-level or character-level diffing
+        if (useWordLevel) {
+            return computeWordDiff(lineA, lineB);
+        }
+
+        const charsA = lineA.split('');
+        const charsB = lineB.split('');
+
+        // Build LCS table for characters
+        const table = buildLCSTable(charsA, charsB);
+
+        // Backtrack to get character diff
+        const charOps = [];
+        let i = charsA.length;
+        let j = charsB.length;
+
+        while (i > 0 || j > 0) {
+            if (i > 0 && j > 0 && charsA[i - 1] === charsB[j - 1]) {
+                charOps.unshift({
+                    type: DiffType.EQUAL,
+                    char: charsA[i - 1]
+                });
+                i--;
+                j--;
+            } else if (j > 0 && (i === 0 || table[i][j - 1] >= table[i - 1][j])) {
+                charOps.unshift({
+                    type: DiffType.ADDED,
+                    char: charsB[j - 1]
+                });
+                j--;
+            } else if (i > 0) {
+                charOps.unshift({
+                    type: DiffType.REMOVED,
+                    char: charsA[i - 1]
+                });
+                i--;
+            } else {
+                break;
+            }
+        }
+
+        // Consolidate consecutive operations of the same type
+        return consolidateCharDiff(charOps);
+    }
+
+    /**
+     * 6.2 Word-level diff for cleaner results on prose/code
+     * Splits by word boundaries and compares words
+     */
+    function computeWordDiff(lineA, lineB) {
+        // Split into words while preserving whitespace
+        const wordsA = splitIntoTokens(lineA);
+        const wordsB = splitIntoTokens(lineB);
+
+        // Build LCS table for words
+        const table = buildLCSTable(wordsA, wordsB);
+
+        // Backtrack to get word diff
+        const wordOps = [];
+        let i = wordsA.length;
+        let j = wordsB.length;
+
+        while (i > 0 || j > 0) {
+            if (i > 0 && j > 0 && wordsA[i - 1] === wordsB[j - 1]) {
+                wordOps.unshift({
+                    type: DiffType.EQUAL,
+                    char: wordsA[i - 1]
+                });
+                i--;
+                j--;
+            } else if (j > 0 && (i === 0 || table[i][j - 1] >= table[i - 1][j])) {
+                wordOps.unshift({
+                    type: DiffType.ADDED,
+                    char: wordsB[j - 1]
+                });
+                j--;
+            } else if (i > 0) {
+                wordOps.unshift({
+                    type: DiffType.REMOVED,
+                    char: wordsA[i - 1]
+                });
+                i--;
+            } else {
+                break;
+            }
+        }
+
+        // Consolidate consecutive operations
+        return consolidateCharDiff(wordOps);
+    }
+
+    /**
+     * Split text into tokens (words and whitespace)
+     * Preserves whitespace as separate tokens for accurate reconstruction
+     */
+    function splitIntoTokens(text) {
+        if (!text) return [];
+        // Split on word boundaries, keeping separators
+        // This regex captures: words, whitespace sequences, and punctuation
+        const tokens = text.match(/\S+|\s+/g) || [];
+        return tokens;
+    }
+
+    /**
+     * Consolidate consecutive character operations into segments
+     */
+    function consolidateCharDiff(charOps) {
+        if (charOps.length === 0) return [];
+
+        const segments = [];
+        let currentSegment = {
+            type: charOps[0].type,
+            text: charOps[0].char
+        };
+
+        for (let i = 1; i < charOps.length; i++) {
+            if (charOps[i].type === currentSegment.type) {
+                currentSegment.text += charOps[i].char;
+            } else {
+                segments.push(currentSegment);
+                currentSegment = {
+                    type: charOps[i].type,
+                    text: charOps[i].char
+                };
+            }
+        }
+        segments.push(currentSegment);
+
+        return segments;
+    }
+
+    // ==========================================
+    // 4.9 Orchestrator function: generate complete diff result
+    // ==========================================
+    function generateDiffResult(original, modified, options = {}) {
+        // Handle edge cases
+        if (original === null || original === undefined) original = '';
+        if (modified === null || modified === undefined) modified = '';
+
+        // Compute line-level diff
+        let operations = computeLineDiff(original, modified, options);
+
+        // Pair adjacent changes for character-level diffing
+        operations = pairAdjacentChanges(operations);
+
+        // Calculate statistics
+        const stats = calculateStats(operations);
+
+        // Generate formatted results for both views
+        const sideBySide = formatSideBySide(operations);
+        const inline = formatInline(operations);
+
+        return {
+            operations,
+            stats,
+            sideBySide,
+            inline,
+            isEmpty: original === '' && modified === '',
+            isIdentical: stats.additions === 0 && stats.deletions === 0 && stats.modifications === 0
+        };
+    }
+
+    /**
+     * Calculate diff statistics
+     */
+    function calculateStats(operations) {
+        let additions = 0;
+        let deletions = 0;
+        let modifications = 0;
+        let unchanged = 0;
+
+        operations.forEach(op => {
+            switch (op.type) {
+                case DiffType.ADDED:
+                    additions++;
+                    break;
+                case DiffType.REMOVED:
+                    deletions++;
+                    break;
+                case DiffType.MODIFIED:
+                    modifications++;
+                    break;
+                case DiffType.EQUAL:
+                    unchanged++;
+                    break;
+            }
+        });
+
+        return {
+            additions,
+            deletions,
+            modifications,
+            unchanged,
+            total: operations.length
+        };
+    }
+
+    /**
+     * Format diff operations for side-by-side view
+     */
+    function formatSideBySide(operations) {
+        const left = [];
+        const right = [];
+
+        operations.forEach(op => {
+            switch (op.type) {
+                case DiffType.EQUAL:
+                    left.push({
+                        lineNumber: op.originalLine,
+                        content: op.originalContent,
+                        type: DiffType.EQUAL
+                    });
+                    right.push({
+                        lineNumber: op.modifiedLine,
+                        content: op.modifiedContent,
+                        type: DiffType.EQUAL
+                    });
+                    break;
+
+                case DiffType.REMOVED:
+                    left.push({
+                        lineNumber: op.originalLine,
+                        content: op.originalContent,
+                        type: DiffType.REMOVED
+                    });
+                    right.push({
+                        lineNumber: null,
+                        content: '',
+                        type: 'empty'
+                    });
+                    break;
+
+                case DiffType.ADDED:
+                    left.push({
+                        lineNumber: null,
+                        content: '',
+                        type: 'empty'
+                    });
+                    right.push({
+                        lineNumber: op.modifiedLine,
+                        content: op.modifiedContent,
+                        type: DiffType.ADDED
+                    });
+                    break;
+
+                case DiffType.MODIFIED:
+                    left.push({
+                        lineNumber: op.originalLine,
+                        content: op.originalContent,
+                        type: DiffType.MODIFIED,
+                        charDiff: op.charDiff,
+                        isOriginal: true
+                    });
+                    right.push({
+                        lineNumber: op.modifiedLine,
+                        content: op.modifiedContent,
+                        type: DiffType.MODIFIED,
+                        charDiff: op.charDiff,
+                        isOriginal: false
+                    });
+                    break;
+            }
+        });
+
+        return { left, right };
+    }
+
+    /**
+     * Format diff operations for inline/unified view
+     */
+    function formatInline(operations) {
+        const lines = [];
+
+        operations.forEach(op => {
+            switch (op.type) {
+                case DiffType.EQUAL:
+                    lines.push({
+                        leftLineNumber: op.originalLine,
+                        rightLineNumber: op.modifiedLine,
+                        content: op.originalContent,
+                        type: DiffType.EQUAL,
+                        prefix: ' '
+                    });
+                    break;
+
+                case DiffType.REMOVED:
+                    lines.push({
+                        leftLineNumber: op.originalLine,
+                        rightLineNumber: null,
+                        content: op.originalContent,
+                        type: DiffType.REMOVED,
+                        prefix: '-'
+                    });
+                    break;
+
+                case DiffType.ADDED:
+                    lines.push({
+                        leftLineNumber: null,
+                        rightLineNumber: op.modifiedLine,
+                        content: op.modifiedContent,
+                        type: DiffType.ADDED,
+                        prefix: '+'
+                    });
+                    break;
+
+                case DiffType.MODIFIED:
+                    // Show removed line first, then added line
+                    lines.push({
+                        leftLineNumber: op.originalLine,
+                        rightLineNumber: null,
+                        content: op.originalContent,
+                        type: DiffType.REMOVED,
+                        prefix: '-',
+                        charDiff: op.charDiff,
+                        isModified: true
+                    });
+                    lines.push({
+                        leftLineNumber: null,
+                        rightLineNumber: op.modifiedLine,
+                        content: op.modifiedContent,
+                        type: DiffType.ADDED,
+                        prefix: '+',
+                        charDiff: op.charDiff,
+                        isModified: true
+                    });
+                    break;
+            }
+        });
+
+        return lines;
+    }
+
+    /**
+     * 6.3 & 6.4 Render character diff with HTML markup
+     *
+     * 6.3: Render removed line with highlights
+     *      - Unchanged chars rendered normal
+     *      - Removed chars wrapped in <span class="char-removed">
+     *
+     * 6.4: Render added line with highlights
+     *      - Unchanged chars rendered normal
+     *      - Added chars wrapped in <span class="char-added">
+     *
+     * @param {Array} charDiff - Character diff segments from computeCharDiff()
+     * @param {boolean} showRemoved - true for original/left side (show removed chars)
+     *                                false for modified/right side (show added chars)
+     * @returns {string} HTML string with highlighted changes
+     */
+    function renderCharDiffHTML(charDiff, showRemoved = true) {
+        if (!charDiff || charDiff.length === 0) return '';
+
+        return charDiff.map(segment => {
+            const escapedText = escapeHTML(segment.text);
+
+            switch (segment.type) {
+                case DiffType.EQUAL:
+                    // Unchanged characters - render normally
+                    return escapedText;
+                case DiffType.REMOVED:
+                    // 6.3: Removed chars wrapped in highlight span (only on original/left side)
+                    return showRemoved ? `<span class="char-removed">${escapedText}</span>` : '';
+                case DiffType.ADDED:
+                    // 6.4: Added chars wrapped in highlight span (only on modified/right side)
+                    return !showRemoved ? `<span class="char-added">${escapedText}</span>` : '';
+                default:
+                    return escapedText;
+            }
+        }).join('');
+    }
+
+    /**
+     * Escape HTML special characters
+     */
+    function escapeHTML(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    // ==========================================
+    // 4.10 / 6.x Test utilities for edge cases
+    // ==========================================
+    function runTests() {
+        const tests = [
+            {
+                name: 'Empty inputs',
+                original: '',
+                modified: '',
+                expected: { isIdentical: true, isEmpty: true }
+            },
+            {
+                name: 'Identical texts',
+                original: 'Hello\nWorld',
+                modified: 'Hello\nWorld',
+                expected: { isIdentical: true, stats: { additions: 0, deletions: 0 } }
+            },
+            {
+                name: 'Completely different texts',
+                original: 'AAA\nBBB',
+                modified: 'XXX\nYYY',
+                expected: { isIdentical: false }
+            },
+            {
+                name: 'Single line change',
+                original: 'Hello World',
+                modified: 'Hello Universe',
+                expected: { isIdentical: false }
+            },
+            {
+                name: 'Line added',
+                original: 'Line 1\nLine 2',
+                modified: 'Line 1\nLine 1.5\nLine 2',
+                expected: { stats: { additions: 1, deletions: 0 } }
+            },
+            {
+                name: 'Line removed',
+                original: 'Line 1\nLine 2\nLine 3',
+                modified: 'Line 1\nLine 3',
+                expected: { stats: { deletions: 1, additions: 0 } }
+            },
+            {
+                name: 'Windows line endings',
+                original: 'Line 1\r\nLine 2',
+                modified: 'Line 1\nLine 2',
+                expected: { isIdentical: true }
+            },
+            {
+                name: 'Ignore case option',
+                original: 'HELLO',
+                modified: 'hello',
+                options: { ignoreCase: true },
+                expected: { isIdentical: true }
+            },
+            {
+                name: 'Trim lines option',
+                original: '  Hello  ',
+                modified: 'Hello',
+                options: { trimLines: true },
+                expected: { isIdentical: true }
+            },
+            // Phase 6 specific tests
+            {
+                name: '6.1 Paired change detection (modification)',
+                original: 'Hello World',
+                modified: 'Hello Universe',
+                expected: { stats: { modifications: 1, additions: 0, deletions: 0 } }
+            },
+            {
+                name: '6.5 Multi-line pairing (2 removed, 2 added)',
+                original: 'Line A\nLine B',
+                modified: 'Line X\nLine Y',
+                expected: { stats: { modifications: 2, additions: 0, deletions: 0 } }
+            },
+            {
+                name: '6.5 Uneven pairing (3 removed, 1 added)',
+                original: 'Line 1\nLine 2\nLine 3',
+                modified: 'Line X',
+                expected: { stats: { modifications: 1, deletions: 2, additions: 0 } }
+            }
+        ];
+
+        console.group('DiffModule Tests');
+        let passed = 0;
+        let failed = 0;
+
+        tests.forEach(test => {
+            const result = generateDiffResult(test.original, test.modified, test.options || {});
+            let testPassed = true;
+
+            if (test.expected.isIdentical !== undefined && result.isIdentical !== test.expected.isIdentical) {
+                testPassed = false;
+            }
+            if (test.expected.isEmpty !== undefined && result.isEmpty !== test.expected.isEmpty) {
+                testPassed = false;
+            }
+            if (test.expected.stats) {
+                if (test.expected.stats.additions !== undefined && result.stats.additions !== test.expected.stats.additions) {
+                    testPassed = false;
+                }
+                if (test.expected.stats.deletions !== undefined && result.stats.deletions !== test.expected.stats.deletions) {
+                    testPassed = false;
+                }
+                if (test.expected.stats.modifications !== undefined && result.stats.modifications !== test.expected.stats.modifications) {
+                    testPassed = false;
+                }
+            }
+
+            if (testPassed) {
+                console.log(`✅ ${test.name}`);
+                passed++;
+            } else {
+                console.error(`❌ ${test.name}`, { expected: test.expected, result });
+                failed++;
+            }
+        });
+
+        console.log(`\nResults: ${passed} passed, ${failed} failed`);
+        console.groupEnd();
+
+        return { passed, failed };
+    }
+
+    // ==========================================
+    // ==========================================
+    // Public API
+    // ==========================================
+    return {
+        // Types
+        DiffType,
+
+        // Core functions
+        splitLines,
+        buildLCSTable,
+        backtrackLCS,
+        computeLineDiff,
+        computeCharDiff,
+        computeWordDiff,
+        splitIntoTokens,
+        pairAdjacentChanges,
+        applyOptions,
+        generateDiffResult,
+
+        // Formatting
+        formatSideBySide,
+        formatInline,
+        renderCharDiffHTML,
+        escapeHTML,
+
+        // Statistics
+        calculateStats,
+
+        // Testing
+        runTests
+    };
+
+})();
+
+// Export for use in other modules (Node.js compatibility)
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = DiffModule;
+}
+=============================================================
+/* ============================================================
+   DevDocs — app.js  (PDF-on-disk, folder persistence, clear)
+   ============================================================ */
+
+// ── Data Store ──────────────────────────────────────────────
+let tasks = [];
+let docs  = [];
+let currentPage    = 'dashboard';
+let currentDocId   = null;
+let editingTaskId  = null;
+let folderHandle   = null; // File System Access API directory handle
+
+const TASKS_CACHE = 'devdocs_tasks_cache';
+const DOCS_CACHE  = 'devdocs_docs_cache';
+const SIDECAR     = '.devdocs-data.json';
+
+// ── jsPDF Helper ────────────────────────────────────────────
+function getJsPDF() {
+  if (window.jspdf && window.jspdf.jsPDF) return window.jspdf.jsPDF;
+  if (window.jsPDF) return window.jsPDF;
+  return null;
+}
+
+// ── Disk I/O (File System Access API) ───────────────────────
+async function writeToDisk(fileName, content) {
+  if (!folderHandle) return;
+  try {
+    const fh = await folderHandle.getFileHandle(fileName, { create: true });
+    const w  = await fh.createWritable();
+    await w.write(content);
+    await w.close();
+  } catch (e) { console.error('writeToDisk', e); }
+}
+
+async function readFromDisk(fileName) {
+  if (!folderHandle) return null;
+  try {
+    const fh   = await folderHandle.getFileHandle(fileName);
+    const file = await fh.getFile();
+    return await file.text();
+  } catch { return null; }
+}
+
+// ── Persist helpers ─────────────────────────────────────────
+function saveCache() {
+  localStorage.setItem(TASKS_CACHE, JSON.stringify(tasks));
+  localStorage.setItem(DOCS_CACHE,  JSON.stringify(docs));
+}
+
+async function saveSidecar() {
+  const data = JSON.stringify({ tasks, docs }, null, 2);
+  await writeToDisk(SIDECAR, data);
+}
+
+async function saveTasks() {
+  saveCache();
+  await saveSidecar();
+}
+
+async function saveDocs() {
+  saveCache();
+  await saveSidecar();
+}
+
+// ── Pick Folder ─────────────────────────────────────────────
+async function pickFolder() {
+  if (!window.showDirectoryPicker) {
+    showToast('Your browser does not support the File System Access API', 'error');
+    return;
+  }
+  try {
+    folderHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+    updateStorageIndicator(true);
+    showToast('Folder connected — data will persist across refreshes', 'success');
+
+    // Try to load sidecar data from disk
+    const raw = await readFromDisk(SIDECAR);
+    if (raw) {
+      try {
+        const data = JSON.parse(raw);
+        if (data.tasks && data.tasks.length) tasks = data.tasks;
+        if (data.docs  && data.docs.length)  docs  = data.docs;
+        saveCache();
+        refreshAll();
+        showToast('Data loaded from folder', 'info');
+      } catch (e) { console.warn('sidecar parse error', e); }
+    } else {
+      // No sidecar yet — save current state
+      await saveSidecar();
+    }
+  } catch (e) {
+    if (e.name !== 'AbortError') showToast('Failed to connect folder', 'error');
+  }
+}
+
+// ── Storage Indicator ───────────────────────────────────────
+function updateStorageIndicator(connected) {
+  const el = document.getElementById('storageIndicator');
+  if (!el) return;
+  if (connected) {
+    el.className = 'storage-indicator connected';
+    el.title     = 'Connected to disk folder';
+    el.innerHTML = '<i class="fas fa-plug-circle-check"></i> Connected';
+  } else {
+    el.className = 'storage-indicator disconnected';
+    el.title     = 'Not connected to disk';
+    el.innerHTML = '<i class="fas fa-plug-circle-xmark"></i> No folder';
+  }
+}
+
+// ── PDF Generation (combined Tasks + Docs) ──────────────────
+function generateCombinedPDF() {
+  const JsPDF = getJsPDF();
+  if (!JsPDF) { showToast('jsPDF library not loaded', 'error'); return null; }
+
+  const doc = new JsPDF({ unit: 'mm', format: 'a4' });
+  const W = doc.internal.pageSize.getWidth();
+  const H = doc.internal.pageSize.getHeight();
+  const M = 15; // margin
+  let y = M;
+
+  function checkPage(need) {
+    if (y + need > H - M) { doc.addPage(); y = M; }
+  }
+
+  // ─ Cover Page ─
+  doc.setFillColor(226, 0, 116); // #e20074
+  doc.rect(0, 0, W, H, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(36);
+  doc.setFont('helvetica', 'bold');
+  doc.text('DevDocs Report', W / 2, H / 2 - 20, { align: 'center' });
+  doc.setFontSize(14);
+  doc.setFont('helvetica', 'normal');
+  doc.text('Tasks & Documentation', W / 2, H / 2 + 5, { align: 'center' });
+  doc.setFontSize(11);
+  doc.text('Generated: ' + new Date().toLocaleString(), W / 2, H / 2 + 20, { align: 'center' });
+  doc.text('Tasks: ' + tasks.length + '  |  Documents: ' + docs.length, W / 2, H / 2 + 30, { align: 'center' });
+
+  // ─ Tasks Section ─
+  doc.addPage();
+  y = M;
+  doc.setTextColor(226, 0, 116);
+  doc.setFontSize(22);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Tasks', M, y);
+  y += 12;
+  doc.setDrawColor(226, 0, 116);
+  doc.setLineWidth(0.5);
+  doc.line(M, y, W - M, y);
+  y += 8;
+
+  if (tasks.length === 0) {
+    doc.setTextColor(120, 120, 120);
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'italic');
+    doc.text('No tasks created yet.', M, y);
+    y += 10;
+  } else {
+    tasks.forEach((t, idx) => {
+      checkPage(50);
+      // Task header bar
+      doc.setFillColor(245, 245, 250);
+      doc.roundedRect(M, y, W - 2 * M, 10, 2, 2, 'F');
+      doc.setTextColor(30, 30, 30);
+      doc.setFontSize(12);
+      doc.setFont('helvetica', 'bold');
+      doc.text((idx + 1) + '. ' + (t.title || 'Untitled'), M + 3, y + 7);
+
+      // Status & priority badge
+      const badge = (t.status || 'pending').toUpperCase() + '  |  ' + (t.priority || 'medium').toUpperCase();
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(100, 100, 100);
+      doc.text(badge, W - M - 3, y + 7, { align: 'right' });
+      y += 14;
+
+      // Description
+      if (t.description) {
+        checkPage(15);
+        doc.setTextColor(60, 60, 60);
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'normal');
+        const lines = doc.splitTextToSize(t.description, W - 2 * M - 6);
+        doc.text(lines, M + 3, y);
+        y += lines.length * 5 + 4;
+      }
+
+      // Code
+      if (t.code) {
+        checkPage(20);
+        doc.setFillColor(40, 44, 52);
+        const codeLines = doc.splitTextToSize(t.code, W - 2 * M - 10);
+        const codeH = codeLines.length * 4.5 + 8;
+        checkPage(codeH);
+        doc.roundedRect(M + 3, y, W - 2 * M - 6, codeH, 2, 2, 'F');
+        doc.setTextColor(200, 200, 200);
+        doc.setFont('courier', 'normal');
+        doc.setFontSize(8);
+        doc.text(codeLines, M + 6, y + 5);
+        y += codeH + 4;
+      }
+
+      // Notes
+      if (t.notes) {
+        checkPage(15);
+        doc.setTextColor(80, 80, 80);
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'italic');
+        const nLines = doc.splitTextToSize('Notes: ' + t.notes, W - 2 * M - 6);
+        doc.text(nLines, M + 3, y);
+        y += nLines.length * 4.5 + 4;
+      }
+
+      // Date
+      doc.setFontSize(8);
+      doc.setTextColor(140, 140, 140);
+      doc.setFont('helvetica', 'normal');
+      doc.text('Created: ' + new Date(t.createdAt).toLocaleString(), M + 3, y);
+      y += 10;
+    });
+  }
+
+  // ─ Documentation Section ─
+  doc.addPage();
+  y = M;
+  doc.setTextColor(226, 0, 116);
+  doc.setFontSize(22);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Documentation', M, y);
+  y += 12;
+  doc.setDrawColor(226, 0, 116);
+  doc.setLineWidth(0.5);
+  doc.line(M, y, W - M, y);
+  y += 8;
+
+  if (docs.length === 0) {
+    doc.setTextColor(120, 120, 120);
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'italic');
+    doc.text('No documents created yet.', M, y);
+    y += 10;
+  } else {
+    docs.forEach((d, idx) => {
+      checkPage(40);
+      // Doc header
+      doc.setFillColor(245, 245, 250);
+      doc.roundedRect(M, y, W - 2 * M, 10, 2, 2, 'F');
+      doc.setTextColor(30, 30, 30);
+      doc.setFontSize(13);
+      doc.setFont('helvetica', 'bold');
+      doc.text((idx + 1) + '. ' + (d.title || 'Untitled'), M + 3, y + 7);
+      y += 14;
+
+      // Content
+      if (d.content) {
+        doc.setTextColor(50, 50, 50);
+        doc.setFontSize(10);
+        doc.setFont('helvetica', 'normal');
+        const cLines = doc.splitTextToSize(d.content, W - 2 * M - 6);
+        cLines.forEach(line => {
+          checkPage(6);
+          doc.text(line, M + 3, y);
+          y += 5;
+        });
+        y += 4;
+      }
+
+      // Date
+      doc.setFontSize(8);
+      doc.setTextColor(140, 140, 140);
+      doc.text('Updated: ' + new Date(d.updatedAt).toLocaleString(), M + 3, y);
+      y += 10;
+    });
+  }
+
+  // ─ Footer on each page ─
+  const totalPages = doc.internal.getNumberOfPages();
+  for (let i = 2; i <= totalPages; i++) {
+    doc.setPage(i);
+    doc.setFontSize(8);
+    doc.setTextColor(160, 160, 160);
+    doc.text('DevDocs Report — Page ' + (i - 1) + ' of ' + (totalPages - 1), W / 2, H - 8, { align: 'center' });
+  }
+
+  return doc;
+}
+
+// ── Save PDF to Folder (or download) ───────────────────────
+async function savePDFToFolder() {
+  const pdfDoc = generateCombinedPDF();
+  if (!pdfDoc) return;
+
+  const fileName = 'DevDocs_Report_' + new Date().toISOString().slice(0, 10) + '.pdf';
+
+  if (folderHandle) {
+    try {
+      const blob = pdfDoc.output('blob');
+      const fh = await folderHandle.getFileHandle(fileName, { create: true });
+      const w  = await fh.createWritable();
+      await w.write(blob);
+      await w.close();
+      showToast('PDF saved', 'success');
+    } catch (e) {
+      console.error('savePDFToFolder', e);
+      showToast('Failed to save PDF to folder', 'error');
+    }
+  } else {
+    // No folder connected — direct download
+    pdfDoc.save(fileName);
+    showToast('PDF downloaded (connect a folder for auto-save)', 'info');
+  }
+}
+
+// ── Clear All Data ──────────────────────────────────────────
+async function clearAllData() {
+  if (!confirm('Are you sure you want to clear ALL tasks and documents? This cannot be undone.')) return;
+
+  tasks = [];
+  docs  = [];
+  currentDocId  = null;
+  editingTaskId = null;
+
+  // Clear cache
+  localStorage.removeItem(TASKS_CACHE);
+  localStorage.removeItem(DOCS_CACHE);
+
+  // Clear sidecar on disk
+  if (folderHandle) {
+    try {
+      await writeToDisk(SIDECAR, JSON.stringify({ tasks: [], docs: [] }));
+    } catch (e) { console.warn('clearSidecar', e); }
+  }
+
+  refreshAll();
+  navigateTo('dashboard');
+  showToast('All data cleared', 'success');
+}
+
+// ── Theme ───────────────────────────────────────────────────
+function toggleTheme() {
+  const html = document.documentElement;
+  const next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+  html.setAttribute('data-theme', next);
+  localStorage.setItem('devdocs_theme', next);
+  document.getElementById('themeToggle').innerHTML =
+    next === 'dark' ? '<i class="fas fa-sun"></i>' : '<i class="fas fa-moon"></i>';
+}
+
+function loadTheme() {
+  const t = localStorage.getItem('devdocs_theme') || 'light';
+  document.documentElement.setAttribute('data-theme', t);
+  document.getElementById('themeToggle').innerHTML =
+    t === 'dark' ? '<i class="fas fa-sun"></i>' : '<i class="fas fa-moon"></i>';
+}
+
+// ── Sidebar ─────────────────────────────────────────────────
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('open');
+  document.getElementById('sidebarOverlay').classList.toggle('active');
+}
+function closeSidebar() {
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebarOverlay').classList.remove('active');
+}
+document.getElementById('sidebarOverlay')?.addEventListener('click', closeSidebar);
+
+function toggleNavGroup(el) {
+  const items = el.nextElementSibling;
+  items.style.display = items.style.display === 'none' ? '' : 'none';
+  el.querySelector('.chevron')?.classList.toggle('collapsed');
+}
+
+// ── Navigation ──────────────────────────────────────────────
+function navigateTo(page, linkEl) {
+  currentPage = page;
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  const target = document.getElementById('page-' + page);
+  if (target) target.classList.add('active');
+
+  document.querySelectorAll('.nav-item a').forEach(a => a.classList.remove('active'));
+  if (linkEl) {
+    linkEl.classList.add('active');
+  } else {
+    const link = document.querySelector(`.nav-item a[data-page="${page}"]`);
+    if (link) link.classList.add('active');
+  }
+
+  if (page === 'dashboard') updateDashboard();
+  if (page === 'tasks')     renderTasks();
+  if (page === 'docs')      renderDocs();
+  closeSidebar();
+}
+
+// ── Toast ───────────────────────────────────────────────────
+function showToast(msg, type = 'info') {
+  const c = document.getElementById('toastContainer');
+  if (!c) return;
+  const icons = { success: 'circle-check', error: 'circle-xmark', info: 'circle-info', warning: 'triangle-exclamation' };
+  const t = document.createElement('div');
+  t.className = 'toast toast-' + type;
+  t.innerHTML = `<i class="fas fa-${icons[type] || 'circle-info'}"></i><span>${msg}</span>`;
+  c.appendChild(t);
+  requestAnimationFrame(() => t.classList.add('show'));
+  setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 300); }, 3000);
+}
+
+// ── Dashboard ───────────────────────────────────────────────
+function updateDashboard() {
+  const total = tasks.length;
+  const comp  = tasks.filter(t => t.status === 'completed').length;
+  const prog  = tasks.filter(t => t.status === 'in-progress').length;
+  const pend  = tasks.filter(t => t.status === 'pending').length;
+
+  setText('statTotal', total);
+  setText('statCompleted', comp);
+  setText('statInProgress', prog);
+  setText('statPending', pend);
+
+  const pct = total ? Math.round(comp / total * 100) : 0;
+  setText('completionPct', pct + '%');
+  setText('completionLabel', total ? `${comp} of ${total} tasks completed` : 'No tasks yet');
+
+  const circle = document.getElementById('progressCircle');
+  if (circle) {
+    const circ = 2 * Math.PI * 58;
+    circle.style.strokeDashoffset = circ - (circ * pct / 100);
+  }
+
+  renderActivity();
+}
+
+function renderActivity() {
+  const el = document.getElementById('activityList');
+  if (!el) return;
+  const recent = [...tasks].sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt)).slice(0, 8);
+  if (!recent.length) {
+    el.innerHTML = '<li class="empty-state" style="padding:30px"><div class="empty-icon"><i class="fas fa-inbox"></i></div><p>No activity yet.</p></li>';
+    return;
+  }
+  el.innerHTML = recent.map(t => {
+    const icon = t.status === 'completed' ? 'circle-check' : t.status === 'in-progress' ? 'spinner' : 'clock';
+    const color = t.status === 'completed' ? '#22c55e' : t.status === 'in-progress' ? '#f59e0b' : '#3b82f6';
+    return `<li class="activity-item" onclick="viewTask('${t.id}')">
+      <span class="activity-dot" style="background:${color}"></span>
+      <div class="activity-text"><strong>${esc(t.title)}</strong><small>${timeAgo(t.updatedAt || t.createdAt)}</small></div>
+      <i class="fas fa-${icon}" style="color:${color}"></i>
+    </li>`;
+  }).join('');
+}
+
+// ── Task CRUD ───────────────────────────────────────────────
+function renderTasks() {
+  const tbody = document.getElementById('taskTableBody');
+  const empty = document.getElementById('taskEmptyState');
+  if (!tbody) return;
+
+  let list = getFilteredTasks();
+  if (!list.length) {
+    tbody.innerHTML = '';
+    if (empty) empty.style.display = '';
+    return;
+  }
+  if (empty) empty.style.display = 'none';
+
+  tbody.innerHTML = list.map(t => {
+    const sc = { pending: 'status-pending', 'in-progress': 'status-progress', completed: 'status-done' }[t.status] || '';
+    const pc = { high: 'priority-high', medium: 'priority-med', low: 'priority-low' }[t.priority] || '';
+    return `<tr>
+      <td><a href="#" onclick="viewTask('${t.id}')" class="task-link">${esc(t.title)}</a></td>
+      <td><span class="badge ${sc}">${t.status}</span></td>
+      <td><span class="badge ${pc}">${t.priority}</span></td>
+      <td>${new Date(t.createdAt).toLocaleDateString()}</td>
+      <td>
+        <button class="btn-icon" title="Edit"   onclick="editTask('${t.id}')"><i class="fas fa-pen"></i></button>
+        <button class="btn-icon" title="Delete" onclick="deleteTask('${t.id}')"><i class="fas fa-trash"></i></button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function getFilteredTasks() {
+  let list = [...tasks];
+  const fs = document.getElementById('filterStatus')?.value;
+  const fp = document.getElementById('filterPriority')?.value;
+  if (fs && fs !== 'all') list = list.filter(t => t.status === fs);
+  if (fp && fp !== 'all') list = list.filter(t => t.priority === fp);
+  return list;
+}
+
+function applyFilters() { renderTasks(); }
+
+function openTaskModal(id) {
+  editingTaskId = id || null;
+  document.getElementById('taskEditId').value     = '';
+  document.getElementById('taskTitle').value       = '';
+  document.getElementById('taskStatus').value      = 'pending';
+  document.getElementById('taskPriority').value    = 'medium';
+  document.getElementById('taskDescription').value = '';
+  document.getElementById('taskCode').value        = '';
+  document.getElementById('taskNotes').value       = '';
+  document.getElementById('taskScreenshots').value = '';
+  document.getElementById('taskModalTitle').textContent = 'New Task';
+
+  if (id) {
+    const t = tasks.find(x => x.id === id);
+    if (t) {
+      document.getElementById('taskEditId').value     = t.id;
+      document.getElementById('taskTitle').value       = t.title || '';
+      document.getElementById('taskStatus').value      = t.status || 'pending';
+      document.getElementById('taskPriority').value    = t.priority || 'medium';
+      document.getElementById('taskDescription').value = t.description || '';
+      document.getElementById('taskCode').value        = t.code || '';
+      document.getElementById('taskNotes').value       = t.notes || '';
+      document.getElementById('taskScreenshots').value = (t.screenshots || []).join('\n');
+      document.getElementById('taskModalTitle').textContent = 'Edit Task';
+    }
+  }
+  document.getElementById('taskModal').classList.add('show');
+}
+
+function closeTaskModal() { document.getElementById('taskModal').classList.remove('show'); editingTaskId = null; }
+
+async function saveTask() {
+  const title = document.getElementById('taskTitle').value.trim();
+  if (!title) { showToast('Task title is required', 'warning'); return; }
+
+  const data = {
+    title,
+    status:      document.getElementById('taskStatus').value,
+    priority:    document.getElementById('taskPriority').value,
+    description: document.getElementById('taskDescription').value.trim(),
+    code:        document.getElementById('taskCode').value.trim(),
+    notes:       document.getElementById('taskNotes').value.trim(),
+    screenshots: document.getElementById('taskScreenshots').value.split('\n').map(s => s.trim()).filter(Boolean),
+    updatedAt:   new Date().toISOString()
+  };
+
+  const eid = document.getElementById('taskEditId').value;
+  if (eid) {
+    const idx = tasks.findIndex(t => t.id === eid);
+    if (idx !== -1) { Object.assign(tasks[idx], data); }
+  } else {
+    data.id = uid();
+    data.createdAt = new Date().toISOString();
+    tasks.unshift(data);
+  }
+
+  await saveTasks();
+  closeTaskModal();
+  renderTasks();
+  updateDashboard();
+  showToast(eid ? 'Task updated' : 'Task created', 'success');
+}
+
+function editTask(id) { openTaskModal(id); }
+
+async function deleteTask(id) {
+  if (!confirm('Delete this task?')) return;
+  tasks = tasks.filter(t => t.id !== id);
+  await saveTasks();
+  renderTasks();
+  updateDashboard();
+  if (currentPage === 'task-detail') navigateTo('tasks');
+  showToast('Task deleted', 'success');
+}
+
+function viewTask(id) {
+  const t = tasks.find(x => x.id === id);
+  if (!t) return;
+  const el = document.getElementById('taskDetailContent');
+  if (!el) return;
+
+  const sc = { pending: 'status-pending', 'in-progress': 'status-progress', completed: 'status-done' }[t.status] || '';
+  const pc = { high: 'priority-high', medium: 'priority-med', low: 'priority-low' }[t.priority] || '';
+
+  el.innerHTML = `
+    <div class="card" style="margin-bottom:20px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px">
+        <div>
+          <h2 style="margin-bottom:8px">${esc(t.title)}</h2>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <span class="badge ${sc}">${t.status}</span>
+            <span class="badge ${pc}">${t.priority}</span>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-sm btn-secondary" onclick="editTask('${t.id}')"><i class="fas fa-pen"></i> Edit</button>
+          <button class="btn btn-sm btn-danger"    onclick="deleteTask('${t.id}')"><i class="fas fa-trash"></i> Delete</button>
+        </div>
+      </div>
+    </div>
+    ${t.description ? `<div class="card"><h3>Description</h3><p style="margin-top:8px;white-space:pre-wrap">${esc(t.description)}</p></div>` : ''}
+    ${t.code ? `<div class="card"><h3>Code Snippet</h3><pre class="code-block"><code>${esc(t.code)}</code></pre></div>` : ''}
+    ${t.notes ? `<div class="card"><h3>Notes</h3><p style="margin-top:8px;white-space:pre-wrap">${esc(t.notes)}</p></div>` : ''}
+    ${t.screenshots && t.screenshots.length ? `<div class="card"><h3>Screenshots</h3><div style="display:grid;gap:12px;margin-top:12px">${t.screenshots.map(s => `<img src="${esc(s)}" alt="screenshot" style="max-width:100%;border-radius:8px;border:1px solid var(--border)" />`).join('')}</div></div>` : ''}
+    <div class="card" style="font-size:.85rem;color:var(--text-secondary)">
+      Created: ${new Date(t.createdAt).toLocaleString()}
+      ${t.updatedAt ? ' &bull; Updated: ' + new Date(t.updatedAt).toLocaleString() : ''}
+    </div>`;
+
+  navigateTo('task-detail');
+}
+
+// ── Docs CRUD ───────────────────────────────────────────────
+function renderDocs() {
+  const list = document.getElementById('docList');
+  const empty = document.getElementById('docEmptyState');
+  if (!list) return;
+
+  if (!docs.length) {
+    list.innerHTML = '';
+    if (empty) empty.style.display = '';
+    return;
+  }
+  if (empty) empty.style.display = 'none';
+
+  list.innerHTML = docs.map(d => `
+    <li class="doc-item ${currentDocId === d.id ? 'active' : ''}" onclick="selectDoc('${d.id}')">
+      <div class="doc-item-title"><i class="fas fa-file-alt" style="margin-right:8px;color:var(--primary)"></i>${esc(d.title)}</div>
+      <small style="color:var(--text-secondary)">${timeAgo(d.updatedAt)}</small>
+    </li>
+  `).join('');
+}
+
+function selectDoc(id) {
+  currentDocId = id;
+  const d = docs.find(x => x.id === id);
+  if (!d) return;
+
+  renderDocs();
+
+  // Editor
+  const edArea     = document.getElementById('docEditorArea');
+  const edPlaceh   = document.getElementById('docEditorPlaceholder');
+  if (edArea)   edArea.style.display   = '';
+  if (edPlaceh) edPlaceh.style.display = 'none';
+  document.getElementById('docEditTitle').value   = d.title || '';
+  document.getElementById('docEditContent').value = d.content || '';
+
+  // Preview
+  const pvArea   = document.getElementById('docPreviewArea');
+  const pvPlaceh = document.getElementById('docPreviewPlaceholder');
+  if (pvArea) {
+    pvArea.style.display   = '';
+    pvArea.innerHTML       = renderMarkdown(d.content || '');
+  }
+  if (pvPlaceh) pvPlaceh.style.display = 'none';
+}
+
+function openDocModal() { document.getElementById('docModal').classList.add('show'); }
+function closeDocModal() {
+  document.getElementById('docModal').classList.remove('show');
+  document.getElementById('newDocTitle').value   = '';
+  document.getElementById('newDocContent').value = '';
+}
+
+async function saveNewDoc() {
+  const title = document.getElementById('newDocTitle').value.trim();
+  if (!title) { showToast('Document title is required', 'warning'); return; }
+  const d = {
+    id: uid(),
+    title,
+    content:   document.getElementById('newDocContent').value.trim(),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+  docs.unshift(d);
+  await saveDocs();
+  closeDocModal();
+  renderDocs();
+  selectDoc(d.id);
+  showToast('Document created', 'success');
+}
+
+async function saveDocEdit() {
+  const d = docs.find(x => x.id === currentDocId);
+  if (!d) return;
+  d.title     = document.getElementById('docEditTitle').value.trim() || d.title;
+  d.content   = document.getElementById('docEditContent').value;
+  d.updatedAt = new Date().toISOString();
+  await saveDocs();
+  renderDocs();
+  selectDoc(d.id);
+  showToast('Document saved', 'success');
+}
+
+async function deleteCurrentDoc() {
+  if (!currentDocId || !confirm('Delete this document?')) return;
+  docs = docs.filter(d => d.id !== currentDocId);
+  currentDocId = null;
+  await saveDocs();
+  renderDocs();
+  // Reset editor & preview
+  const edArea   = document.getElementById('docEditorArea');
+  const edPl     = document.getElementById('docEditorPlaceholder');
+  const pvArea   = document.getElementById('docPreviewArea');
+  const pvPl     = document.getElementById('docPreviewPlaceholder');
+  if (edArea) edArea.style.display = 'none';
+  if (edPl)   edPl.style.display   = '';
+  if (pvArea) pvArea.style.display  = 'none';
+  if (pvPl)   pvPl.style.display    = '';
+  showToast('Document deleted', 'success');
+}
+
+function switchDocTab(tab, btn) {
+  document.querySelectorAll('#docTabs .tab').forEach(t => t.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  document.getElementById('docTabList').style.display    = tab === 'list'    ? '' : 'none';
+  document.getElementById('docTabEditor').style.display  = tab === 'editor'  ? '' : 'none';
+  document.getElementById('docTabPreview').style.display = tab === 'preview' ? '' : 'none';
+}
+
+// ── Markdown Renderer (simple) ──────────────────────────────
+function renderMarkdown(md) {
+  if (!md) return '<p style="color:var(--text-secondary)">No content.</p>';
+  let html = esc(md);
+  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+  html = html.replace(/^## (.+)$/gm,  '<h2>$1</h2>');
+  html = html.replace(/^# (.+)$/gm,   '<h1>$1</h1>');
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+  html = html.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
+  html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
+  html = html.replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>');
+  html = html.replace(/\n/g, '<br>');
+  return '<div style="padding:20px;line-height:1.7">' + html + '</div>';
+}
+
+// ── Search ──────────────────────────────────────────────────
+function handleSearch(q) {
+  const box = document.getElementById('searchResults');
+  if (!box) return;
+  if (!q.trim()) { box.style.display = 'none'; return; }
+  const lower = q.toLowerCase();
+  const results = [];
+
+  tasks.forEach(t => {
+    if ((t.title || '').toLowerCase().includes(lower) || (t.description || '').toLowerCase().includes(lower))
+      results.push({ type: 'task', title: t.title, id: t.id });
+  });
+  docs.forEach(d => {
+    if ((d.title || '').toLowerCase().includes(lower) || (d.content || '').toLowerCase().includes(lower))
+      results.push({ type: 'doc', title: d.title, id: d.id });
+  });
+
+  if (!results.length) {
+    box.innerHTML = '<div class="search-result-item" style="color:var(--text-secondary)">No results</div>';
+  } else {
+    box.innerHTML = results.slice(0, 10).map(r => {
+      const icon = r.type === 'task' ? 'tasks' : 'file-alt';
+      return `<div class="search-result-item" onclick="${r.type === 'task' ? `viewTask('${r.id}')` : `selectDoc('${r.id}');navigateTo('docs')`}">
+        <i class="fas fa-${icon}" style="margin-right:8px;color:var(--primary)"></i>${esc(r.title)}
+      </div>`;
+    }).join('');
+  }
+  box.style.display = '';
+}
+
+// Close search results on outside click
+document.addEventListener('click', e => {
+  const box = document.getElementById('searchResults');
+  if (box && !e.target.closest('.header-search')) box.style.display = 'none';
+});
+
+// ── Utilities ───────────────────────────────────────────────
+function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
+function esc(s) { const el = document.createElement('span'); el.textContent = s || ''; return el.innerHTML; }
+function setText(id, v) { const el = document.getElementById(id); if (el) el.textContent = v; }
+
+function timeAgo(d) {
+  const s = Math.floor((Date.now() - new Date(d)) / 1000);
+  if (s < 60)    return 'just now';
+  if (s < 3600)  return Math.floor(s / 60) + 'm ago';
+  if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+  return Math.floor(s / 86400) + 'd ago';
+}
+
+// ── Refresh All Views ───────────────────────────────────────
+function refreshAll() {
+  updateDashboard();
+  renderTasks();
+  renderDocs();
+}
+
+// ── Quick Filter Sidebar Links ──────────────────────────────
+function filterByStatus(status) {
+  document.getElementById('filterStatus').value = status;
+  document.getElementById('filterPriority').value = 'all';
+  navigateTo('tasks');
+}
+
+function filterTasksByStatus(status) {
+  document.getElementById('filterStatus').value = status === 'all' ? 'all' : status;
+  document.getElementById('filterPriority').value = 'all';
+  applyFilters();
+}
+
+function filterTasksByPriority(priority) {
+  document.getElementById('filterPriority').value = priority === 'all' ? 'all' : priority;
+  document.getElementById('filterStatus').value = 'all';
+  applyFilters();
+}
+
+// ── Init ────────────────────────────────────────────────────
+(function init() {
+  loadTheme();
+
+  // Load cached data
+  try { tasks = JSON.parse(localStorage.getItem(TASKS_CACHE)) || []; } catch { tasks = []; }
+  try { docs  = JSON.parse(localStorage.getItem(DOCS_CACHE))  || []; } catch { docs  = []; }
+
+  refreshAll();
+  updateStorageIndicator(false);
+})();
